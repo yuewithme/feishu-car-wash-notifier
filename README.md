@@ -88,7 +88,7 @@ start_car_wash_notifier.cmd
 默认 `EVENT_TYPES` 为：
 
 ```text
-card.action.trigger,bitable.record.created_v1,bitable.record.changed_v1
+card.action.trigger,drive.file.bitable_record_changed_v1
 ```
 
 如果飞书后台实际下发的 Base 新增记录事件名不同，先看 `runtime_events.ndjson` 和 `car_wash_notifier.err.log`，再调整 `.env` 里的 `EVENT_TYPES`。

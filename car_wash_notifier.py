@@ -41,7 +41,7 @@ DEFAULT_CONFIG = {
     "processed_record_path": "processed_record_ids.txt",
     "processed_card_action_path": "processed_card_action_ids.txt",
     "raw_event_path": "runtime_events.ndjson",
-    "event_types": "card.action.trigger,bitable.record.created_v1,bitable.record.changed_v1",
+    "event_types": "card.action.trigger,drive.file.bitable_record_changed_v1",
     "plate_link_table_id": "tblkx9E9JqKpxbJL",
     "plate_link_display_field": "车辆名称",
 }
@@ -723,6 +723,8 @@ def parse_new_record_event(event: dict[str, Any]) -> str | None:
     lowered = event_type.lower()
     if "card.action" in lowered:
         return None
+    if event_type == "drive.file.bitable_record_changed_v1":
+        return parse_bitable_record_added_event(event)
     if not any(marker in lowered for marker in ("base", "bitable", "record")):
         return None
     if not any(marker in lowered for marker in ("create", "created", "add", "added", "change", "changed")):
@@ -735,6 +737,25 @@ def parse_new_record_event(event: dict[str, Any]) -> str | None:
     if table_id and str(table_id) != TABLE_ID:
         return None
     return str(record_id) if record_id else None
+
+
+def parse_bitable_record_added_event(event: dict[str, Any]) -> str | None:
+    event_body = event.get("event") if isinstance(event.get("event"), dict) else {}
+    file_token = find_first_value(event_body, {"file_token", "app_token", "base_token", "appToken", "baseToken"})
+    table_id = find_first_value(event_body, {"table_id", "tableId"})
+    if file_token and str(file_token) != BASE_TOKEN:
+        return None
+    if table_id and str(table_id) != TABLE_ID:
+        return None
+    action_list = event_body.get("action_list")
+    if not isinstance(action_list, list):
+        return None
+    for action in action_list:
+        if not isinstance(action, dict):
+            continue
+        if action.get("action") == "record_added" and action.get("record_id"):
+            return str(action["record_id"])
+    return None
 
 
 def find_actor_open_id(event: dict[str, Any]) -> str | None:

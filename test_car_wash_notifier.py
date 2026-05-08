@@ -71,6 +71,21 @@ class CarWashNotifierTests(unittest.TestCase):
 
         self.assertEqual(car_wash_notifier.parse_new_record_event(event), "rec_1")
 
+    def test_parses_drive_bitable_record_added_event(self):
+        event = {
+            "header": {"event_type": "drive.file.bitable_record_changed_v1"},
+            "event": {
+                "file_token": "LdiKbOgd7a5FSvsgNO5c0DNunTa",
+                "table_id": "tblaTXQqJNNAzMSS",
+                "action_list": [
+                    {"action": "record_edited", "record_id": "rec_ignore"},
+                    {"action": "record_added", "record_id": "rec_added"},
+                ],
+            },
+        }
+
+        self.assertEqual(car_wash_notifier.parse_new_record_event(event), "rec_added")
+
     def test_detects_link_value_that_needs_display_resolution(self):
         self.assertTrue(car_wash_notifier.needs_link_display_resolution([{"id": "rec_vehicle"}]))
         self.assertFalse(car_wash_notifier.needs_link_display_resolution([{"id": "rec_vehicle", "text": "沪A12345"}]))
