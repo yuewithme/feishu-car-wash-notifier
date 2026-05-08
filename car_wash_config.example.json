@@ -16,5 +16,8 @@
   "health_path": "runtime_health.json",
   "processed_record_path": "processed_record_ids.txt",
   "processed_card_action_path": "processed_card_action_ids.txt",
-  "raw_event_path": "runtime_events.ndjson"
+  "raw_event_path": "runtime_events.ndjson",
+  "event_types": "card.action.trigger,bitable.record.created_v1,bitable.record.changed_v1",
+  "plate_link_table_id": "tblkx9E9JqKpxbJL",
+  "plate_link_display_field": "车辆名称"
 }

@@ -15,6 +15,7 @@ SHARED_CONFIG_PATHS = [
     PROJECT_ROOT.parent / "feishu_config.json",
 ]
 CONFIG_PATH = MODULE_DIR / "car_wash_config.json"
+ENV_PATH = MODULE_DIR / ".env"
 
 DEFAULT_SHARED_CONFIG = {
     "base_host": "https://atomdance.feishu.cn",
@@ -40,6 +41,9 @@ DEFAULT_CONFIG = {
     "processed_record_path": "processed_record_ids.txt",
     "processed_card_action_path": "processed_card_action_ids.txt",
     "raw_event_path": "runtime_events.ndjson",
+    "event_types": "card.action.trigger,bitable.record.created_v1,bitable.record.changed_v1",
+    "plate_link_table_id": "tblkx9E9JqKpxbJL",
+    "plate_link_display_field": "车辆名称",
 }
 
 
@@ -53,6 +57,43 @@ def load_json_config(path: Path, defaults: dict[str, Any]) -> dict[str, Any]:
     return config
 
 
+def load_env_config(path: Path = ENV_PATH) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    env: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        env[key.strip()] = value.strip().strip('"').strip("'")
+    return env
+
+
+def apply_env_overrides(config: dict[str, Any], shared_config: dict[str, Any], env: dict[str, str]) -> None:
+    config_key_map = {
+        "BASE_TOKEN": "base_token",
+        "TABLE_ID": "table_id",
+        "TARGET_CHAT_ID": "target_chat_id",
+        "CARD_TITLE": "card_title",
+        "CARD_HEADER_TEMPLATE": "card_header_template",
+        "EVENT_TYPES": "event_types",
+        "PLATE_LINK_TABLE_ID": "plate_link_table_id",
+        "PLATE_LINK_DISPLAY_FIELD": "plate_link_display_field",
+    }
+    shared_key_map = {
+        "BASE_HOST": "base_host",
+        "BOT_CREATOR_OPEN_ID": "bot_creator_open_id",
+        "TIMEZONE": "timezone",
+    }
+    for env_key, config_key in config_key_map.items():
+        if env.get(env_key):
+            config[config_key] = env[env_key]
+    for env_key, config_key in shared_key_map.items():
+        if env.get(env_key):
+            shared_config[config_key] = env[env_key]
+
+
 def load_shared_config() -> dict[str, Any]:
     for path in SHARED_CONFIG_PATHS:
         if path.exists():
@@ -60,8 +101,10 @@ def load_shared_config() -> dict[str, Any]:
     return dict(DEFAULT_SHARED_CONFIG)
 
 
-SHARED_CONFIG = load_shared_config()
 CONFIG = load_json_config(CONFIG_PATH, DEFAULT_CONFIG)
+SHARED_CONFIG = load_shared_config()
+ENV_CONFIG = load_env_config()
+apply_env_overrides(CONFIG, SHARED_CONFIG, ENV_CONFIG)
 
 BASE_TOKEN = str(CONFIG["base_token"])
 TABLE_ID = str(CONFIG["table_id"])
@@ -104,8 +147,10 @@ def print_status() -> None:
     payload = {
         "base_token": BASE_TOKEN,
         "table_id": TABLE_ID,
+        "target_chat_id": str(CONFIG.get("target_chat_id") or ""),
         "base_host": BASE_HOST,
         "config_path": str(CONFIG_PATH),
+        "env_path": str(ENV_PATH),
         "health_path": str(HEALTH_PATH),
     }
     if HEALTH_PATH.exists():
@@ -149,6 +194,8 @@ def run_listener(lark_cli: str, dry_run: bool = False) -> None:
         lark_cli,
         "event",
         "+subscribe",
+        "--event-types",
+        str(CONFIG.get("event_types") or "card.action.trigger"),
         "--as",
         "bot",
     ]
@@ -221,6 +268,7 @@ def process_record_payload(
 ) -> dict[str, Any]:
     record_id = str(payload.get("record_id") or payload.get("recordId") or "")
     fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else payload
+    fields = enrich_record_fields(dict(fields), lark_cli) if isinstance(fields, dict) else {}
     card = build_car_wash_card(fields, record_id)
     target_chat_id = chat_id or str(CONFIG.get("target_chat_id") or "")
     target_user_id = user_id or ""
@@ -377,6 +425,69 @@ def fetch_record_fields(record_id: str, lark_cli: str) -> dict[str, Any]:
     if isinstance(record, dict) and isinstance(record.get("fields"), dict):
         return record["fields"]
     return record if isinstance(record, dict) else {}
+
+
+def enrich_record_fields(fields: dict[str, Any], lark_cli: str) -> dict[str, Any]:
+    mapping = field_mapping()
+    plate_field = mapping["plate_number"]
+    plate_value = fields.get(plate_field)
+    if not needs_link_display_resolution(plate_value):
+        return fields
+    linked_record_id = str(plate_value[0].get("id") or "")
+    link_table_id = str(CONFIG.get("plate_link_table_id") or "")
+    display_field = str(CONFIG.get("plate_link_display_field") or "")
+    if not linked_record_id or not link_table_id or not display_field:
+        return fields
+    display_value = fetch_linked_record_display(link_table_id, linked_record_id, display_field, lark_cli)
+    if display_value:
+        enriched = dict(fields)
+        enriched[plate_field] = display_value
+        return enriched
+    return fields
+
+
+def needs_link_display_resolution(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) == 1
+        and isinstance(value[0], dict)
+        and bool(value[0].get("id"))
+        and not (value[0].get("text") or value[0].get("name"))
+    )
+
+
+def fetch_linked_record_display(table_id: str, record_id: str, display_field: str, lark_cli: str) -> str:
+    result = subprocess.run(
+        [
+            lark_cli,
+            "base",
+            "+record-get",
+            "--base-token",
+            BASE_TOKEN,
+            "--table-id",
+            table_id,
+            "--record-id",
+            record_id,
+            "--as",
+            "user",
+        ],
+        text=True,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        log_event("linked_record_fetch_failed", table_id=table_id, record_id=record_id, stderr=result.stderr)
+        return ""
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return ""
+    record = payload.get("data", {}).get("record") or payload.get("record") or {}
+    if not isinstance(record, dict):
+        return ""
+    return stringify_field(record.get(display_field))
 
 
 def build_car_wash_card(fields: dict[str, Any], record_id: str = "", accepted: bool = False) -> dict[str, Any]:

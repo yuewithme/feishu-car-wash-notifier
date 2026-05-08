@@ -7,3 +7,4 @@ runtime_*.json
 runtime_events.ndjson
 car_wash_config.json
 feishu_config.json
+.env

@@ -17,6 +17,7 @@
 ```cmd
 copy car_wash_config.example.json car_wash_config.json
 copy feishu_config.example.json feishu_config.json
+copy .env.example .env
 ```
 
 默认优先读取本目录的 `feishu_config.json`；如果作为父项目子目录运行，也会回退读取父目录的 `feishu_config.json`：
@@ -31,6 +32,18 @@ copy feishu_config.example.json feishu_config.json
 - `table_id`: `车辆清洗数据总表` 的表 ID，已预填
 - `target_chat_id`: 消息卡片发送目标群，必须是 `oc_xxx`；入群链接不能直接用于发消息
 - `field_mapping`: 洗车流程字段映射，已按当前表结构预填
+
+运行时也会读取 `.env`，并优先用 `.env` 覆盖 JSON 配置。常用变量：
+
+- `BASE_TOKEN`
+- `TABLE_ID`
+- `TARGET_CHAT_ID`
+- `BASE_HOST`
+- `BOT_CREATOR_OPEN_ID`
+- `TIMEZONE`
+- `EVENT_TYPES`
+- `PLATE_LINK_TABLE_ID`
+- `PLATE_LINK_DISPLAY_FIELD`
 
 当前流程字段：
 
@@ -71,6 +84,16 @@ start_car_wash_notifier.cmd
 
 - Base 新增记录事件：读取记录详情并发送洗车提醒卡片
 - `card.action.trigger`：处理“接受任务”“完成任务”按钮
+
+默认 `EVENT_TYPES` 为：
+
+```text
+card.action.trigger,bitable.record.created_v1,bitable.record.changed_v1
+```
+
+如果飞书后台实际下发的 Base 新增记录事件名不同，先看 `runtime_events.ndjson` 和 `car_wash_notifier.err.log`，再调整 `.env` 里的 `EVENT_TYPES`。
+
+`车牌号` 是关联字段时，脚本会用 `.env` 中的 `PLATE_LINK_TABLE_ID` 和 `PLATE_LINK_DISPLAY_FIELD` 读取关联车辆表，把卡片里的车牌号展示为可读文本。
 
 异常兜底：发送卡片、读取记录、回写字段、更新卡片失败时，会给根目录 `feishu_config.json` 中的 `bot_creator_open_id` 发送异常卡片。
 

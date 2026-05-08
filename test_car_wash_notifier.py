@@ -71,6 +71,10 @@ class CarWashNotifierTests(unittest.TestCase):
 
         self.assertEqual(car_wash_notifier.parse_new_record_event(event), "rec_1")
 
+    def test_detects_link_value_that_needs_display_resolution(self):
+        self.assertTrue(car_wash_notifier.needs_link_display_resolution([{"id": "rec_vehicle"}]))
+        self.assertFalse(car_wash_notifier.needs_link_display_resolution([{"id": "rec_vehicle", "text": "沪A12345"}]))
+
 
 if __name__ == "__main__":
     unittest.main()
