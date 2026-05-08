@@ -34,6 +34,7 @@ DEFAULT_CONFIG = {
     "field_mapping": {
         "plate_number": "车牌号",
         "cleaning_need": "清洗需求",
+        "return_station_time": "到站时间",
         "cleaner": "清洗人员",
         "completed_at": "清洗完成时间",
         "photo": "清洗照片",
@@ -636,11 +637,13 @@ def build_car_wash_card(fields: dict[str, Any], record_id: str = "", accepted: b
     title = str(CONFIG.get("card_title") or "洗车任务提醒")
     plate_number = stringify_field(fields.get(mapping["plate_number"])) or "未填写"
     cleaning_need = stringify_field(fields.get(mapping["cleaning_need"])) or "未填写"
+    return_station_time = stringify_field(fields.get(mapping["return_station_time"])) or "未填写"
     cleaner = stringify_field(fields.get(mapping["cleaner"]))
     completed_at = stringify_field(fields.get(mapping["completed_at"]))
     rows = [
         ("车牌号", plate_number),
         ("清洗需求", cleaning_need),
+        ("车辆返回场站时间", return_station_time),
         ("清洗人员", cleaner),
         ("清洗完成时间", completed_at),
     ]
@@ -853,6 +856,7 @@ def field_mapping() -> dict[str, str]:
     return {
         "plate_number": str(mapping.get("plate_number") or "车牌号"),
         "cleaning_need": str(mapping.get("cleaning_need") or "清洗需求"),
+        "return_station_time": str(mapping.get("return_station_time") or "到站时间"),
         "cleaner": str(mapping.get("cleaner") or "清洗人员"),
         "completed_at": str(mapping.get("completed_at") or "清洗完成时间"),
         "photo": str(mapping.get("photo") or "清洗照片"),
@@ -960,6 +964,7 @@ def sample_record() -> dict[str, Any]:
         "fields": {
             mapping["plate_number"]: [{"text": "沪A12345"}],
             mapping["cleaning_need"]: "内外清洗",
+            mapping["return_station_time"]: "2026-05-08 16:30:00",
             mapping["cleaner"]: "",
             mapping["completed_at"]: "",
         },

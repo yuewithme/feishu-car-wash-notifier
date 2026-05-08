@@ -15,6 +15,8 @@ class CarWashNotifierTests(unittest.TestCase):
         self.assertEqual(card["header"]["title"]["content"], "洗车任务提醒")
         self.assertIn("沪A12345", card["elements"][0]["content"])
         self.assertIn("内外清洗", card["elements"][0]["content"])
+        self.assertIn("车辆返回场站时间", card["elements"][0]["content"])
+        self.assertIn("2026-05-08 16:30:00", card["elements"][0]["content"])
         self.assertIn("sample_record_id", card["elements"][0]["content"])
         self.assertEqual(card["elements"][1]["actions"][0]["value"]["action"], "accept")
         self.assertEqual(card["elements"][1]["actions"][1]["value"]["action"], "done")

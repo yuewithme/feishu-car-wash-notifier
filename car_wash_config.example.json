@@ -8,6 +8,7 @@
   "field_mapping": {
     "plate_number": "车牌号",
     "cleaning_need": "清洗需求",
+    "return_station_time": "到站时间",
     "cleaner": "清洗人员",
     "completed_at": "清洗完成时间",
     "photo": "清洗照片"
