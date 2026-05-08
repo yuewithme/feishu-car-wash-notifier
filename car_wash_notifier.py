@@ -43,6 +43,7 @@ DEFAULT_CONFIG = {
     "health_path": "runtime_health.json",
     "processed_record_path": "processed_record_ids.txt",
     "processed_card_action_path": "processed_card_action_ids.txt",
+    "card_cache_path": "card_cache.json",
     "raw_event_path": "runtime_events.ndjson",
     "event_types": "card.action.trigger,drive.file.bitable_record_changed_v1",
     "plate_link_table_id": "tblkx9E9JqKpxbJL",
@@ -139,6 +140,7 @@ STRUCTURED_LOG = PROJECT_ROOT / str(CONFIG["structured_log_path"])
 HEALTH_PATH = PROJECT_ROOT / str(CONFIG["health_path"])
 PROCESSED_RECORD_LOG = PROJECT_ROOT / str(CONFIG["processed_record_path"])
 PROCESSED_CARD_ACTION_LOG = PROJECT_ROOT / str(CONFIG["processed_card_action_path"])
+CARD_CACHE_PATH = PROJECT_ROOT / str(CONFIG["card_cache_path"])
 RAW_EVENT_LOG = PROJECT_ROOT / str(CONFIG["raw_event_path"])
 
 
@@ -455,11 +457,18 @@ def handle_card_action_event(
             if action["action"] == "accept":
                 message_id = find_message_id(event)
                 if message_id:
+                    card = load_cached_card(action["record_id"]) or find_card_payload(event)
+                    if card:
+                        updated_card = add_upload_button_to_card(card, action["record_id"])
+                    else:
+                        fields = enrich_record_fields(fetch_record_fields(action["record_id"], lark_cli), lark_cli)
+                        updated_card = build_car_wash_card(fields, action["record_id"], accepted=True)
                     update_card_message(
                         message_id,
-                        add_upload_button_to_card_event(event, action["record_id"]),
+                        updated_card,
                         lark_cli,
                     )
+                    cache_card(action["record_id"], updated_card)
         except RuntimeError as exc:
             alert_creator(
                 lark_cli,
@@ -695,10 +704,7 @@ def build_card_actions(record_id: str, accepted: bool = False) -> list[dict[str,
     return actions
 
 
-def add_upload_button_to_card_event(event: dict[str, Any], record_id: str) -> dict[str, Any]:
-    card = find_card_payload(event)
-    if not card:
-        return build_car_wash_card({}, record_id, accepted=True)
+def add_upload_button_to_card(card: dict[str, Any], record_id: str) -> dict[str, Any]:
     result = dict(card)
     elements = list(result.get("elements") or [])
     for element in elements:
@@ -721,6 +727,13 @@ def add_upload_button_to_card_event(event: dict[str, Any], record_id: str) -> di
         return result
     result["elements"] = elements + [{"tag": "action", "actions": build_card_actions(record_id, accepted=True)}]
     return result
+
+
+def add_upload_button_to_card_event(event: dict[str, Any], record_id: str) -> dict[str, Any]:
+    card = find_card_payload(event)
+    if not card:
+        return build_car_wash_card({}, record_id, accepted=True)
+    return add_upload_button_to_card(card, record_id)
 
 
 def find_card_payload(event: dict[str, Any]) -> dict[str, Any] | None:
@@ -845,6 +858,8 @@ def send_card(
             f"STDERR:\n{result.stderr}"
         )
     update_health(last_card_send_success_at=now_iso(), last_record_id=record_id)
+    if record_id:
+        cache_card(record_id, card)
     log_event("car_wash_card_sent", record_id=record_id, chat_id=chat_id, user_id=user_id)
 
 
@@ -878,6 +893,27 @@ def update_card_message(message_id: str, card: dict[str, Any], lark_cli: str) ->
         )
     update_health(last_card_update_success_at=now_iso())
     log_event("car_wash_card_updated", message_id=message_id)
+
+
+def load_card_cache() -> dict[str, Any]:
+    if not CARD_CACHE_PATH.exists():
+        return {}
+    try:
+        cache = json.loads(CARD_CACHE_PATH.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+    return cache if isinstance(cache, dict) else {}
+
+
+def cache_card(record_id: str, card: dict[str, Any]) -> None:
+    cache = load_card_cache()
+    cache[record_id] = card
+    CARD_CACHE_PATH.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def load_cached_card(record_id: str) -> dict[str, Any] | None:
+    card = load_card_cache().get(record_id)
+    return card if isinstance(card, dict) else None
 
 
 def build_base_table_url() -> str:

@@ -40,6 +40,17 @@ class CarWashNotifierTests(unittest.TestCase):
         actions = updated["elements"][1]["actions"]
         self.assertEqual(actions[2]["value"]["action"], "upload_photo")
 
+    def test_adds_upload_button_to_cached_card_without_losing_fields(self):
+        card = car_wash_notifier.build_car_wash_card(car_wash_notifier.sample_record()["fields"], "rec_1")
+
+        updated = car_wash_notifier.add_upload_button_to_card(card, "rec_1")
+
+        content = updated["elements"][0]["content"]
+        self.assertIn("沪A12345", content)
+        self.assertIn("内外清洗", content)
+        self.assertIn("2026-05-08 16:30:00", content)
+        self.assertEqual(updated["elements"][1]["actions"][2]["value"]["action"], "upload_photo")
+
     def test_parses_card_action(self):
         event = {
             "header": {"event_type": "card.action.trigger", "event_id": "evt_1"},

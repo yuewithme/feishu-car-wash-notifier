@@ -17,6 +17,7 @@
   "health_path": "runtime_health.json",
   "processed_record_path": "processed_record_ids.txt",
   "processed_card_action_path": "processed_card_action_ids.txt",
+  "card_cache_path": "card_cache.json",
   "raw_event_path": "runtime_events.ndjson",
   "event_types": "card.action.trigger,drive.file.bitable_record_changed_v1",
   "plate_link_table_id": "tblkx9E9JqKpxbJL",
