@@ -2,6 +2,8 @@ import argparse
 import json
 import subprocess
 import sys
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -44,6 +46,8 @@ DEFAULT_CONFIG = {
     "event_types": "card.action.trigger,drive.file.bitable_record_changed_v1",
     "plate_link_table_id": "tblkx9E9JqKpxbJL",
     "plate_link_display_field": "车辆名称",
+    "poll_interval_seconds": 15,
+    "poll_send_existing_on_start": False,
 }
 
 
@@ -80,6 +84,8 @@ def apply_env_overrides(config: dict[str, Any], shared_config: dict[str, Any], e
         "EVENT_TYPES": "event_types",
         "PLATE_LINK_TABLE_ID": "plate_link_table_id",
         "PLATE_LINK_DISPLAY_FIELD": "plate_link_display_field",
+        "POLL_INTERVAL_SECONDS": "poll_interval_seconds",
+        "POLL_SEND_EXISTING_ON_START": "poll_send_existing_on_start",
     }
     shared_key_map = {
         "BASE_HOST": "base_host",
@@ -92,6 +98,22 @@ def apply_env_overrides(config: dict[str, Any], shared_config: dict[str, Any], e
     for env_key, config_key in shared_key_map.items():
         if env.get(env_key):
             shared_config[config_key] = env[env_key]
+
+
+def config_bool(key: str, default: bool = False) -> bool:
+    value = CONFIG.get(key)
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def config_int(key: str, default: int = 0) -> int:
+    try:
+        return int(str(CONFIG.get(key, default)).strip())
+    except ValueError:
+        return default
 
 
 def load_shared_config() -> dict[str, Any]:
@@ -190,6 +212,7 @@ def inspect_base(lark_cli: str) -> None:
 def run_listener(lark_cli: str, dry_run: bool = False) -> None:
     processed_record_ids = load_ids(PROCESSED_RECORD_LOG)
     processed_action_ids = load_ids(PROCESSED_CARD_ACTION_LOG)
+    start_polling_thread(processed_record_ids, lark_cli, dry_run=dry_run)
     command = [
         lark_cli,
         "event",
@@ -231,6 +254,124 @@ def run_listener(lark_cli: str, dry_run: bool = False) -> None:
                 )
                 update_health(status="error", last_error=str(exc), last_error_at=now_iso())
                 log_event("event_processing_failed", error=str(exc), event=event)
+
+
+def start_polling_thread(processed_record_ids: set[str], lark_cli: str, dry_run: bool = False) -> None:
+    interval = config_int("poll_interval_seconds", 0)
+    if interval <= 0:
+        return
+    thread = threading.Thread(
+        target=poll_records_forever,
+        args=(processed_record_ids, lark_cli, interval, dry_run),
+        daemon=True,
+    )
+    thread.start()
+    log_event("polling_started", interval_seconds=interval)
+
+
+def poll_records_forever(
+    processed_record_ids: set[str],
+    lark_cli: str,
+    interval: int,
+    dry_run: bool = False,
+) -> None:
+    baseline_done = False
+    while True:
+        try:
+            poll_pending_records(processed_record_ids, lark_cli, baseline=not baseline_done, dry_run=dry_run)
+            baseline_done = True
+        except RuntimeError as exc:
+            alert_creator(
+                lark_cli,
+                "洗车任务轮询失败",
+                str(exc),
+                dedupe_key=f"poll:{now_iso()}",
+            )
+            update_health(status="error", last_error=str(exc), last_error_at=now_iso())
+            log_event("polling_failed", error=str(exc))
+        time.sleep(interval)
+
+
+def poll_pending_records(
+    processed_record_ids: set[str],
+    lark_cli: str,
+    baseline: bool = False,
+    dry_run: bool = False,
+) -> None:
+    records = list_records(lark_cli)
+    send_existing = config_bool("poll_send_existing_on_start", False)
+    for record in records:
+        record_id = record["record_id"]
+        if record_id in processed_record_ids:
+            continue
+        if baseline and not send_existing:
+            processed_record_ids.add(record_id)
+            append_id(PROCESSED_RECORD_LOG, record_id)
+            log_event("polling_baseline_record_marked", record_id=record_id)
+            continue
+        process_record_payload(
+            {"record_id": record_id, "fields": record["fields"]},
+            lark_cli,
+            dry_run=dry_run,
+        )
+        processed_record_ids.add(record_id)
+        append_id(PROCESSED_RECORD_LOG, record_id)
+        update_health(last_polled_record_at=now_iso(), last_record_id=record_id)
+        log_event("polling_record_processed", record_id=record_id)
+
+
+def list_records(lark_cli: str) -> list[dict[str, Any]]:
+    result = subprocess.run(
+        [
+            lark_cli,
+            "base",
+            "+record-list",
+            "--base-token",
+            BASE_TOKEN,
+            "--table-id",
+            TABLE_ID,
+            "--offset",
+            "0",
+            "--limit",
+            "200",
+            "--as",
+            "user",
+        ],
+        text=True,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "Failed to list Base records\n"
+            f"STDOUT:\n{result.stdout}\n"
+            f"STDERR:\n{result.stderr}"
+        )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Failed to parse record-list output: {exc}") from exc
+    data = payload.get("data", {})
+    fields = data.get("fields") or []
+    rows = data.get("data") or []
+    record_ids = data.get("record_id_list") or []
+    records: list[dict[str, Any]] = []
+    for index, record_id in enumerate(record_ids):
+        values = rows[index] if index < len(rows) and isinstance(rows[index], list) else []
+        record_fields = {
+            str(field): values[field_index] if field_index < len(values) else None
+            for field_index, field in enumerate(fields)
+        }
+        if should_notify_record(record_fields):
+            records.append({"record_id": str(record_id), "fields": record_fields})
+    return records
+
+
+def should_notify_record(fields: dict[str, Any]) -> bool:
+    mapping = field_mapping()
+    return bool(fields.get(mapping["plate_number"]) and fields.get(mapping["cleaning_need"]))
 
 
 def handle_event(
@@ -832,6 +973,9 @@ def main() -> None:
     parser.add_argument("--inspect-base", action="store_true")
     parser.add_argument("--send-sample-card", action="store_true")
     parser.add_argument("--record-json", default="")
+    parser.add_argument("--record-id", default="")
+    parser.add_argument("--poll-once", action="store_true")
+    parser.add_argument("--send-existing", action="store_true")
     parser.add_argument("--chat-id", default="")
     parser.add_argument("--user-id", default="")
     parser.add_argument("--dry-run", action="store_true")
@@ -846,8 +990,23 @@ def main() -> None:
     if args.send_sample_card:
         process_record_payload(sample_record(), args.lark_cli, args.chat_id, args.user_id, dry_run=args.dry_run)
         return
+    if args.record_id:
+        process_record_payload(
+            {"record_id": args.record_id, "fields": fetch_record_fields(args.record_id, args.lark_cli)},
+            args.lark_cli,
+            args.chat_id,
+            args.user_id,
+            dry_run=args.dry_run,
+        )
+        return
     if args.record_json:
         process_record_payload(json.loads(args.record_json), args.lark_cli, args.chat_id, args.user_id, dry_run=args.dry_run)
+        return
+    if args.poll_once:
+        processed_record_ids = load_ids(PROCESSED_RECORD_LOG)
+        if args.send_existing:
+            CONFIG["poll_send_existing_on_start"] = True
+        poll_pending_records(processed_record_ids, args.lark_cli, baseline=not args.send_existing, dry_run=args.dry_run)
         return
     run_listener(args.lark_cli, dry_run=args.dry_run)
 

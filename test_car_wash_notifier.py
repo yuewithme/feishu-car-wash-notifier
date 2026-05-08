@@ -90,6 +90,14 @@ class CarWashNotifierTests(unittest.TestCase):
         self.assertTrue(car_wash_notifier.needs_link_display_resolution([{"id": "rec_vehicle"}]))
         self.assertFalse(car_wash_notifier.needs_link_display_resolution([{"id": "rec_vehicle", "text": "沪A12345"}]))
 
+    def test_should_notify_record_requires_plate_and_need(self):
+        self.assertTrue(
+            car_wash_notifier.should_notify_record(
+                {"车牌号": [{"id": "rec_vehicle"}], "清洗需求": ["需要小清洗"]}
+            )
+        )
+        self.assertFalse(car_wash_notifier.should_notify_record({"车牌号": [{"id": "rec_vehicle"}]}))
+
 
 if __name__ == "__main__":
     unittest.main()

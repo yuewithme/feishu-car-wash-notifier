@@ -44,6 +44,8 @@ copy .env.example .env
 - `EVENT_TYPES`
 - `PLATE_LINK_TABLE_ID`
 - `PLATE_LINK_DISPLAY_FIELD`
+- `POLL_INTERVAL_SECONDS`
+- `POLL_SEND_EXISTING_ON_START`
 
 当前流程字段：
 
@@ -94,6 +96,20 @@ card.action.trigger,drive.file.bitable_record_changed_v1
 如果飞书后台实际下发的 Base 新增记录事件名不同，先看 `runtime_events.ndjson` 和 `car_wash_notifier.err.log`，再调整 `.env` 里的 `EVENT_TYPES`。
 
 `车牌号` 是关联字段时，脚本会用 `.env` 中的 `PLATE_LINK_TABLE_ID` 和 `PLATE_LINK_DISPLAY_FIELD` 读取关联车辆表，把卡片里的车牌号展示为可读文本。
+
+脚本会保留 WebSocket 监听，同时用 `POLL_INTERVAL_SECONDS` 做轮询兜底。首次启动默认只把已有记录标记为已见过，不会批量补发；后续新增记录会被轮询发卡片。
+
+手动补发某条记录：
+
+```cmd
+python car_wash_notifier.py --record-id rec_xxx
+```
+
+手动轮询一次：
+
+```cmd
+python car_wash_notifier.py --poll-once
+```
 
 异常兜底：发送卡片、读取记录、回写字段、更新卡片失败时，会给根目录 `feishu_config.json` 中的 `bot_creator_open_id` 发送异常卡片。
 
