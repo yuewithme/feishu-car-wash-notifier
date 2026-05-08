@@ -21,6 +21,6 @@
   "event_types": "card.action.trigger,drive.file.bitable_record_changed_v1",
   "plate_link_table_id": "tblkx9E9JqKpxbJL",
   "plate_link_display_field": "车辆名称",
-  "poll_interval_seconds": 15,
+  "poll_interval_seconds": 3,
   "poll_send_existing_on_start": false
 }

@@ -47,7 +47,7 @@ DEFAULT_CONFIG = {
     "event_types": "card.action.trigger,drive.file.bitable_record_changed_v1",
     "plate_link_table_id": "tblkx9E9JqKpxbJL",
     "plate_link_display_field": "车辆名称",
-    "poll_interval_seconds": 15,
+    "poll_interval_seconds": 3,
     "poll_send_existing_on_start": False,
 }
 
@@ -453,12 +453,11 @@ def handle_card_action_event(
         try:
             update_record(action["record_id"], update, lark_cli)
             if action["action"] == "accept":
-                fields = fetch_record_fields(action["record_id"], lark_cli)
                 message_id = find_message_id(event)
                 if message_id:
                     update_card_message(
                         message_id,
-                        build_car_wash_card(fields, action["record_id"], accepted=True),
+                        add_upload_button_to_card_event(event, action["record_id"]),
                         lark_cli,
                     )
         except RuntimeError as exc:
@@ -694,6 +693,44 @@ def build_card_actions(record_id: str, accepted: bool = False) -> list[dict[str,
             }
         )
     return actions
+
+
+def add_upload_button_to_card_event(event: dict[str, Any], record_id: str) -> dict[str, Any]:
+    card = find_card_payload(event)
+    if not card:
+        return build_car_wash_card({}, record_id, accepted=True)
+    result = dict(card)
+    elements = list(result.get("elements") or [])
+    for element in elements:
+        if not isinstance(element, dict) or element.get("tag") != "action":
+            continue
+        actions = list(element.get("actions") or [])
+        if any(isinstance(action, dict) and action.get("value", {}).get("action") == "upload_photo" for action in actions):
+            return result
+        actions.append(
+            {
+                "tag": "button",
+                "text": {"tag": "plain_text", "content": "上传清洗照片"},
+                "type": "default",
+                "url": build_base_record_url(record_id),
+                "value": {"action": "upload_photo", "record_id": record_id},
+            }
+        )
+        element["actions"] = actions
+        result["elements"] = elements
+        return result
+    result["elements"] = elements + [{"tag": "action", "actions": build_card_actions(record_id, accepted=True)}]
+    return result
+
+
+def find_card_payload(event: dict[str, Any]) -> dict[str, Any] | None:
+    action = event.get("event", {}).get("action", {})
+    if isinstance(action, dict):
+        for key in ("card", "context_card"):
+            value = action.get(key)
+            if isinstance(value, dict) and isinstance(value.get("elements"), list):
+                return value
+    return None
 
 
 def stringify_field(value: Any) -> str:

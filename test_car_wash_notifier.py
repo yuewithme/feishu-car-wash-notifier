@@ -31,6 +31,15 @@ class CarWashNotifierTests(unittest.TestCase):
         self.assertEqual(actions[2]["text"]["content"], "上传清洗照片")
         self.assertIn("record=sample_record_id", actions[2]["url"])
 
+    def test_adds_upload_button_to_existing_card_without_refetch(self):
+        card = car_wash_notifier.build_car_wash_card(car_wash_notifier.sample_record()["fields"], "rec_1")
+        event = {"event": {"action": {"card": card}}}
+
+        updated = car_wash_notifier.add_upload_button_to_card_event(event, "rec_1")
+
+        actions = updated["elements"][1]["actions"]
+        self.assertEqual(actions[2]["value"]["action"], "upload_photo")
+
     def test_parses_card_action(self):
         event = {
             "header": {"event_type": "card.action.trigger", "event_id": "evt_1"},
