@@ -51,6 +51,16 @@ class CarWashNotifierTests(unittest.TestCase):
         self.assertIn("2026-05-08 16:30:00", content)
         self.assertEqual(updated["elements"][1]["actions"][2]["value"]["action"], "upload_photo")
 
+    def test_marks_done_button_cleaned_and_disabled(self):
+        card = car_wash_notifier.build_car_wash_card(car_wash_notifier.sample_record()["fields"], "rec_1")
+
+        updated = car_wash_notifier.mark_done_button_cleaned(card)
+
+        done_button = updated["elements"][1]["actions"][1]
+        self.assertEqual(done_button["text"]["content"], "已清洗")
+        self.assertEqual(done_button["disabled"], True)
+        self.assertIn("沪A12345", updated["elements"][0]["content"])
+
     def test_parses_card_action(self):
         event = {
             "header": {"event_type": "card.action.trigger", "event_id": "evt_1"},

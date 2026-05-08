@@ -454,21 +454,33 @@ def handle_card_action_event(
     elif action["record_id"] and update:
         try:
             update_record(action["record_id"], update, lark_cli)
-            if action["action"] == "accept":
-                message_id = find_message_id(event)
-                if message_id:
-                    card = load_cached_card(action["record_id"]) or find_card_payload(event)
-                    if card:
-                        updated_card = add_upload_button_to_card(card, action["record_id"])
-                    else:
-                        fields = enrich_record_fields(fetch_record_fields(action["record_id"], lark_cli), lark_cli)
-                        updated_card = build_car_wash_card(fields, action["record_id"], accepted=True)
-                    update_card_message(
-                        message_id,
-                        updated_card,
-                        lark_cli,
-                    )
-                    cache_card(action["record_id"], updated_card)
+            message_id = find_message_id(event)
+            if message_id and action["action"] == "accept":
+                card = load_cached_card(action["record_id"]) or find_card_payload(event)
+                if card:
+                    updated_card = add_upload_button_to_card(card, action["record_id"])
+                else:
+                    fields = enrich_record_fields(fetch_record_fields(action["record_id"], lark_cli), lark_cli)
+                    updated_card = build_car_wash_card(fields, action["record_id"], accepted=True)
+                update_card_message(
+                    message_id,
+                    updated_card,
+                    lark_cli,
+                )
+                cache_card(action["record_id"], updated_card)
+            elif message_id and action["action"] == "done":
+                card = load_cached_card(action["record_id"]) or find_card_payload(event)
+                if card:
+                    updated_card = mark_done_button_cleaned(card)
+                else:
+                    fields = enrich_record_fields(fetch_record_fields(action["record_id"], lark_cli), lark_cli)
+                    updated_card = mark_done_button_cleaned(build_car_wash_card(fields, action["record_id"], accepted=True))
+                update_card_message(
+                    message_id,
+                    updated_card,
+                    lark_cli,
+                )
+                cache_card(action["record_id"], updated_card)
         except RuntimeError as exc:
             alert_creator(
                 lark_cli,
@@ -726,6 +738,32 @@ def add_upload_button_to_card(card: dict[str, Any], record_id: str) -> dict[str,
         result["elements"] = elements
         return result
     result["elements"] = elements + [{"tag": "action", "actions": build_card_actions(record_id, accepted=True)}]
+    return result
+
+
+def mark_done_button_cleaned(card: dict[str, Any]) -> dict[str, Any]:
+    result = dict(card)
+    elements = list(result.get("elements") or [])
+    for element in elements:
+        if not isinstance(element, dict) or element.get("tag") != "action":
+            continue
+        actions = []
+        changed = False
+        for action in element.get("actions") or []:
+            if not isinstance(action, dict):
+                actions.append(action)
+                continue
+            updated_action = dict(action)
+            value = updated_action.get("value")
+            if isinstance(value, dict) and value.get("action") == "done":
+                updated_action["text"] = {"tag": "plain_text", "content": "已清洗"}
+                updated_action["disabled"] = True
+                changed = True
+            actions.append(updated_action)
+        if changed:
+            element["actions"] = actions
+            result["elements"] = elements
+            return result
     return result
 
 
