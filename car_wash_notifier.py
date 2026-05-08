@@ -38,6 +38,9 @@ DEFAULT_CONFIG = {
         "cleaner": "清洗人员",
         "completed_at": "清洗完成时间",
         "photo": "清洗照片",
+        "status": "任务状态",
+        "group_message_id": "群消息ID",
+        "private_message_id": "私聊消息ID",
     },
     "structured_log_path": "events/automation.jsonl",
     "health_path": "runtime_health.json",
@@ -212,9 +215,113 @@ def inspect_base(lark_cli: str) -> None:
     print(result.stdout)
 
 
+def ensure_required_fields(lark_cli: str) -> None:
+    existing = set(list_field_names(lark_cli))
+    mapping = field_mapping()
+    required_fields = [
+        {
+            "name": mapping["status"],
+            "type": "select",
+            "multiple": False,
+            "options": [
+                {"name": "待接单", "hue": "Blue", "lightness": "Lighter"},
+                {"name": "已接单", "hue": "Orange", "lightness": "Light"},
+                {"name": "已完成", "hue": "Green", "lightness": "Light"},
+                {"name": "异常", "hue": "Red", "lightness": "Light"},
+            ],
+        },
+        {"name": mapping["group_message_id"], "type": "text", "style": {"type": "plain"}},
+        {"name": mapping["private_message_id"], "type": "text", "style": {"type": "plain"}},
+    ]
+    for field in required_fields:
+        if field["name"] in existing:
+            continue
+        create_field(field, lark_cli)
+        existing.add(str(field["name"]))
+    log_event("required_fields_ensured", fields=[field["name"] for field in required_fields])
+
+
+def list_field_names(lark_cli: str) -> list[str]:
+    result = subprocess.run(
+        [
+            lark_cli,
+            "base",
+            "+field-list",
+            "--base-token",
+            BASE_TOKEN,
+            "--table-id",
+            TABLE_ID,
+            "--offset",
+            "0",
+            "--limit",
+            "100",
+            "--as",
+            "user",
+        ],
+        text=True,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "Failed to list Base fields\n"
+            f"STDOUT:\n{result.stdout}\n"
+            f"STDERR:\n{result.stderr}"
+        )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Failed to parse field-list output: {exc}") from exc
+    fields = payload.get("data", {}).get("fields") or payload.get("fields") or []
+    names: list[str] = []
+    for field in fields:
+        if isinstance(field, dict):
+            name = field.get("field_name") or field.get("name")
+            if name:
+                names.append(str(name))
+        elif isinstance(field, str):
+            names.append(field)
+    return names
+
+
+def create_field(field: dict[str, Any], lark_cli: str) -> None:
+    result = subprocess.run(
+        [
+            lark_cli,
+            "base",
+            "+field-create",
+            "--base-token",
+            BASE_TOKEN,
+            "--table-id",
+            TABLE_ID,
+            "--json",
+            json.dumps(field, ensure_ascii=False),
+            "--as",
+            "user",
+        ],
+        text=True,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            "Failed to create Base field\n"
+            f"FIELD:\n{json.dumps(field, ensure_ascii=False)}\n"
+            f"STDOUT:\n{result.stdout}\n"
+            f"STDERR:\n{result.stderr}"
+        )
+    log_event("base_field_created", field=field)
+
+
 def run_listener(lark_cli: str, dry_run: bool = False) -> None:
     processed_record_ids = load_ids(PROCESSED_RECORD_LOG)
     processed_action_ids = load_ids(PROCESSED_CARD_ACTION_LOG)
+    if not dry_run:
+        ensure_required_fields(lark_cli)
     start_polling_thread(processed_record_ids, lark_cli, dry_run=dry_run)
     command = [
         lark_cli,
@@ -374,7 +481,24 @@ def list_records(lark_cli: str) -> list[dict[str, Any]]:
 
 def should_notify_record(fields: dict[str, Any]) -> bool:
     mapping = field_mapping()
-    return bool(fields.get(mapping["plate_number"]) and fields.get(mapping["cleaning_need"]))
+    return bool(
+        fields.get(mapping["plate_number"])
+        and fields.get(mapping["cleaning_need"])
+        and not has_sent_group_message(fields)
+    )
+
+
+def has_sent_group_message(fields: dict[str, Any]) -> bool:
+    mapping = field_mapping()
+    return bool(fields.get(mapping["group_message_id"]))
+
+
+def record_has_photo(fields: dict[str, Any]) -> bool:
+    mapping = field_mapping()
+    value = fields.get(mapping["photo"])
+    if isinstance(value, list):
+        return bool(value)
+    return bool(value)
 
 
 def handle_event(
@@ -413,6 +537,9 @@ def process_record_payload(
     record_id = str(payload.get("record_id") or payload.get("recordId") or "")
     fields = payload.get("fields") if isinstance(payload.get("fields"), dict) else payload
     fields = enrich_record_fields(dict(fields), lark_cli) if isinstance(fields, dict) else {}
+    if record_id and has_sent_group_message(fields):
+        log_event("skip_record_with_group_message_id", record_id=record_id)
+        return build_car_wash_card(fields, record_id)
     card = build_car_wash_card(fields, record_id)
     target_chat_id = chat_id or str(CONFIG.get("target_chat_id") or "")
     target_user_id = user_id or ""
@@ -420,7 +547,17 @@ def process_record_payload(
         print(json.dumps({"target_chat_id": target_chat_id, "target_user_id": target_user_id, "card": card}, ensure_ascii=False))
         return card
     try:
-        send_card(card, lark_cli, record_id=record_id, chat_id=target_chat_id, user_id=target_user_id)
+        message_id = send_card(card, lark_cli, record_id=record_id, chat_id=target_chat_id, user_id=target_user_id)
+        if record_id and message_id and target_chat_id:
+            mapping = field_mapping()
+            update_record(
+                record_id,
+                {
+                    mapping["status"]: "待接单",
+                    mapping["group_message_id"]: message_id,
+                },
+                lark_cli,
+            )
     except RuntimeError as exc:
         alert_creator(
             lark_cli,
@@ -448,39 +585,73 @@ def handle_card_action_event(
     if not action:
         log_event("skip_unparsed_card_action", event_id=event_id)
         return
-    update = build_action_update(action["action"], event)
+    record_fields: dict[str, Any] | None = None
+    if action["action"] == "done" and action["record_id"] and not dry_run:
+        record_fields = fetch_record_fields(action["record_id"], lark_cli)
+    update = build_action_update(action["action"], event, record_fields=record_fields)
     if dry_run:
         print(json.dumps({"record_id": action["record_id"], "update": update}, ensure_ascii=False))
+    elif action["record_id"] and action["action"] == "done" and not update:
+        actor_open_id = find_actor_open_id(event)
+        if actor_open_id:
+            fields = enrich_record_fields(record_fields or fetch_record_fields(action["record_id"], lark_cli), lark_cli)
+            reminder_card = build_photo_required_card(fields, action["record_id"])
+            send_card(
+                reminder_card,
+                lark_cli,
+                record_id=f"{action['record_id']}-photo-required",
+                user_id=actor_open_id,
+            )
+        log_event("skip_done_without_photo", event_id=event_id, record_id=action["record_id"])
     elif action["record_id"] and update:
         try:
             update_record(action["record_id"], update, lark_cli)
             message_id = find_message_id(event)
             if message_id and action["action"] == "accept":
+                actor_open_id = find_actor_open_id(event) or ""
                 card = load_cached_card(action["record_id"]) or find_card_payload(event)
                 if card:
-                    updated_card = add_upload_button_to_card(card, action["record_id"])
+                    updated_card = mark_group_card_accepted(card, actor_open_id)
                 else:
                     fields = enrich_record_fields(fetch_record_fields(action["record_id"], lark_cli), lark_cli)
-                    updated_card = build_car_wash_card(fields, action["record_id"], accepted=True)
+                    updated_card = mark_group_card_accepted(build_car_wash_card(fields, action["record_id"]), actor_open_id)
                 update_card_message(
                     message_id,
                     updated_card,
                     lark_cli,
                 )
                 cache_card(action["record_id"], updated_card)
+                if actor_open_id:
+                    fields = enrich_record_fields(fetch_record_fields(action["record_id"], lark_cli), lark_cli)
+                    private_card = build_private_work_card(fields, action["record_id"])
+                    private_message_id = send_card(
+                        private_card,
+                        lark_cli,
+                        record_id=f"{action['record_id']}-private-{actor_open_id}",
+                        user_id=actor_open_id,
+                    )
+                    if private_message_id:
+                        update_record(
+                            action["record_id"],
+                            {field_mapping()["private_message_id"]: private_message_id},
+                            lark_cli,
+                        )
+                    cache_card(f"{action['record_id']}:private:{actor_open_id}", private_card)
             elif message_id and action["action"] == "done":
-                card = load_cached_card(action["record_id"]) or find_card_payload(event)
+                card = find_card_payload(event)
                 if card:
                     updated_card = mark_done_button_cleaned(card)
                 else:
-                    fields = enrich_record_fields(fetch_record_fields(action["record_id"], lark_cli), lark_cli)
-                    updated_card = mark_done_button_cleaned(build_car_wash_card(fields, action["record_id"], accepted=True))
+                    fields = enrich_record_fields(record_fields or fetch_record_fields(action["record_id"], lark_cli), lark_cli)
+                    updated_card = mark_done_button_cleaned(build_private_work_card(fields, action["record_id"]))
                 update_card_message(
                     message_id,
                     updated_card,
                     lark_cli,
                 )
-                cache_card(action["record_id"], updated_card)
+                actor_open_id = find_actor_open_id(event) or ""
+                if actor_open_id:
+                    cache_card(f"{action['record_id']}:private:{actor_open_id}", updated_card)
         except RuntimeError as exc:
             alert_creator(
                 lark_cli,
@@ -507,15 +678,24 @@ def parse_card_action(event: dict[str, Any]) -> dict[str, str] | None:
     return {"action": action, "record_id": record_id}
 
 
-def build_action_update(action: str, event: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_action_update(
+    action: str,
+    event: dict[str, Any] | None = None,
+    record_fields: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     mapping = field_mapping()
     if action == "accept":
         open_id = find_actor_open_id(event or {})
         if not open_id:
             raise RuntimeError("未能从卡片点击事件中识别点击用户 open_id")
-        return {mapping["cleaner"]: [{"id": open_id}]}
+        return {mapping["cleaner"]: [{"id": open_id}], mapping["status"]: "已接单"}
     if action == "done":
-        return {mapping["completed_at"]: datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")}
+        if record_fields is not None and not record_has_photo(record_fields):
+            return {}
+        return {
+            mapping["completed_at"]: datetime.now(TIMEZONE).strftime("%Y-%m-%d %H:%M:%S"),
+            mapping["status"]: "已完成",
+        }
     return {}
 
 
@@ -688,6 +868,40 @@ def build_car_wash_card(fields: dict[str, Any], record_id: str = "", accepted: b
     }
 
 
+def build_private_work_card(fields: dict[str, Any], record_id: str = "") -> dict[str, Any]:
+    card = build_car_wash_card(fields, record_id, accepted=False)
+    card["elements"][1]["actions"] = [
+        {
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": "完成任务"},
+            "type": "primary",
+            "value": {"action": "done", "record_id": record_id},
+        },
+        {
+            "tag": "button",
+            "text": {"tag": "plain_text", "content": "上传清洗照片"},
+            "type": "default",
+            "url": build_base_record_url(record_id),
+            "value": {"action": "upload_photo", "record_id": record_id},
+        },
+    ]
+    return card
+
+
+def build_photo_required_card(fields: dict[str, Any], record_id: str = "") -> dict[str, Any]:
+    card = build_private_work_card(fields, record_id)
+    card["header"]["template"] = "orange"
+    card["header"]["title"]["content"] = "请先上传清洗照片"
+    card["elements"].insert(
+        1,
+        {
+            "tag": "markdown",
+            "content": "检测到这条记录还没有清洗照片。请先上传照片，再点击完成任务。",
+        },
+    )
+    return card
+
+
 def build_card_actions(record_id: str, accepted: bool = False) -> list[dict[str, Any]]:
     actions: list[dict[str, Any]] = [
         {
@@ -738,6 +952,32 @@ def add_upload_button_to_card(card: dict[str, Any], record_id: str) -> dict[str,
         result["elements"] = elements
         return result
     result["elements"] = elements + [{"tag": "action", "actions": build_card_actions(record_id, accepted=True)}]
+    return result
+
+
+def mark_group_card_accepted(card: dict[str, Any], actor_open_id: str) -> dict[str, Any]:
+    result = dict(card)
+    elements = list(result.get("elements") or [])
+    mention = f"<at id={actor_open_id}></at>已接清洗任务" if actor_open_id else "已接清洗任务"
+    for element in elements:
+        if isinstance(element, dict) and element.get("tag") == "markdown":
+            content = str(element.get("content") or "")
+            if mention not in content and "已接清洗任务" not in content:
+                element["content"] = f"{content}\n**任务状态：** {mention}" if content else f"**任务状态：** {mention}"
+            break
+    for element in elements:
+        if not isinstance(element, dict) or element.get("tag") != "action":
+            continue
+        disabled_actions = []
+        for action in element.get("actions") or []:
+            if isinstance(action, dict):
+                updated_action = dict(action)
+                updated_action["disabled"] = True
+                disabled_actions.append(updated_action)
+            else:
+                disabled_actions.append(action)
+        element["actions"] = disabled_actions
+    result["elements"] = elements
     return result
 
 
@@ -863,7 +1103,7 @@ def send_card(
     record_id: str = "",
     chat_id: str = "",
     user_id: str = "",
-) -> None:
+) -> str:
     if not chat_id and not user_id:
         raise RuntimeError("No card target configured. Set target_chat_id, target_user_open_id, or pass --chat-id/--user-id.")
     target_args = ["--chat-id", chat_id] if chat_id else ["--user-id", user_id]
@@ -895,10 +1135,21 @@ def send_card(
             f"STDOUT:\n{result.stdout}\n"
             f"STDERR:\n{result.stderr}"
         )
-    update_health(last_card_send_success_at=now_iso(), last_record_id=record_id)
+    message_id = parse_sent_message_id(result.stdout)
+    update_health(last_card_send_success_at=now_iso(), last_record_id=record_id, last_message_id=message_id)
     if record_id:
         cache_card(record_id, card)
-    log_event("car_wash_card_sent", record_id=record_id, chat_id=chat_id, user_id=user_id)
+    log_event("car_wash_card_sent", record_id=record_id, chat_id=chat_id, user_id=user_id, message_id=message_id)
+    return message_id
+
+
+def parse_sent_message_id(output: str) -> str:
+    try:
+        payload = json.loads(output)
+    except json.JSONDecodeError:
+        return ""
+    value = find_first_value(payload, {"open_message_id", "message_id", "messageId"})
+    return value or ""
 
 
 def update_card_message(message_id: str, card: dict[str, Any], lark_cli: str) -> None:
@@ -971,6 +1222,9 @@ def field_mapping() -> dict[str, str]:
         "cleaner": str(mapping.get("cleaner") or "清洗人员"),
         "completed_at": str(mapping.get("completed_at") or "清洗完成时间"),
         "photo": str(mapping.get("photo") or "清洗照片"),
+        "status": str(mapping.get("status") or "任务状态"),
+        "group_message_id": str(mapping.get("group_message_id") or "群消息ID"),
+        "private_message_id": str(mapping.get("private_message_id") or "私聊消息ID"),
     }
 
 
@@ -1087,6 +1341,7 @@ def main() -> None:
     parser.add_argument("--lark-cli", default="lark-cli")
     parser.add_argument("--status", action="store_true")
     parser.add_argument("--inspect-base", action="store_true")
+    parser.add_argument("--ensure-fields", action="store_true")
     parser.add_argument("--send-sample-card", action="store_true")
     parser.add_argument("--record-json", default="")
     parser.add_argument("--record-id", default="")
@@ -1102,6 +1357,9 @@ def main() -> None:
         return
     if args.inspect_base:
         inspect_base(args.lark_cli)
+        return
+    if args.ensure_fields:
+        ensure_required_fields(args.lark_cli)
         return
     if args.send_sample_card:
         process_record_payload(sample_record(), args.lark_cli, args.chat_id, args.user_id, dry_run=args.dry_run)

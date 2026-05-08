@@ -11,7 +11,10 @@
     "return_station_time": "到站时间",
     "cleaner": "清洗人员",
     "completed_at": "清洗完成时间",
-    "photo": "清洗照片"
+    "photo": "清洗照片",
+    "status": "任务状态",
+    "group_message_id": "群消息ID",
+    "private_message_id": "私聊消息ID"
   },
   "structured_log_path": "events/automation.jsonl",
   "health_path": "runtime_health.json",

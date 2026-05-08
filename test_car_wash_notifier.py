@@ -61,6 +61,47 @@ class CarWashNotifierTests(unittest.TestCase):
         self.assertEqual(done_button["disabled"], True)
         self.assertIn("沪A12345", updated["elements"][0]["content"])
 
+    def test_marks_group_card_accepted_and_disabled(self):
+        card = car_wash_notifier.build_car_wash_card(car_wash_notifier.sample_record()["fields"], "rec_1")
+
+        updated = car_wash_notifier.mark_group_card_accepted(card, "ou_cleaner")
+
+        self.assertIn("<at id=ou_cleaner></at>已接清洗任务", updated["elements"][0]["content"])
+        for action in updated["elements"][1]["actions"]:
+            self.assertEqual(action["disabled"], True)
+
+    def test_builds_private_work_card_after_accept(self):
+        card = car_wash_notifier.build_private_work_card(car_wash_notifier.sample_record()["fields"], "rec_1")
+
+        actions = card["elements"][1]["actions"]
+        self.assertEqual(actions[0]["value"]["action"], "done")
+        self.assertEqual(actions[1]["value"]["action"], "upload_photo")
+        self.assertNotIn("接受任务", str(actions))
+
+    def test_parse_sent_message_id_from_cli_output(self):
+        output = '{"data":{"message_id":"om_123"}}'
+
+        self.assertEqual(car_wash_notifier.parse_sent_message_id(output), "om_123")
+
+    def test_should_not_notify_record_with_group_message_id(self):
+        self.assertFalse(
+            car_wash_notifier.should_notify_record(
+                {
+                    "车牌号": [{"id": "rec_vehicle"}],
+                    "清洗需求": ["需要小清洗"],
+                    "群消息ID": "om_sent",
+                }
+            )
+        )
+
+    def test_done_requires_photo_before_update(self):
+        update = car_wash_notifier.build_action_update(
+            "done",
+            record_fields={"清洗照片": None},
+        )
+
+        self.assertEqual(update, {})
+
     def test_parses_card_action(self):
         event = {
             "header": {"event_type": "card.action.trigger", "event_id": "evt_1"},
@@ -81,7 +122,10 @@ class CarWashNotifierTests(unittest.TestCase):
 
     def test_builds_accept_update_from_click_user(self):
         event = {"event": {"operator": {"open_id": "ou_cleaner"}}}
-        self.assertEqual(car_wash_notifier.build_action_update("accept", event), {"清洗人员": [{"id": "ou_cleaner"}]})
+        self.assertEqual(
+            car_wash_notifier.build_action_update("accept", event),
+            {"清洗人员": [{"id": "ou_cleaner"}], "任务状态": "已接单"},
+        )
 
     def test_builds_done_update_with_completion_time(self):
         update = car_wash_notifier.build_action_update("done")
