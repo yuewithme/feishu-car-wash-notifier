@@ -1043,7 +1043,27 @@ def fetch_linked_record_display(table_id: str, record_id: str, display_field: st
                 error=str(stdout_exc),
             )
             return ""
-    return stringify_field(extract_record_fields(payload).get(display_field))
+    fields = extract_record_fields(payload)
+    if fields.get(display_field):
+        return stringify_field(fields.get(display_field))
+    tabular_value = extract_tabular_record_value(payload, record_id, display_field)
+    return stringify_field(tabular_value)
+
+
+def extract_tabular_record_value(payload: dict[str, Any], record_id: str, field_name: str) -> Any:
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    fields = data.get("fields") or []
+    rows = data.get("data") or []
+    record_ids = data.get("record_id_list") or []
+    if field_name not in fields:
+        return None
+    field_index = fields.index(field_name)
+    for row_index, current_record_id in enumerate(record_ids):
+        if str(current_record_id) != record_id:
+            continue
+        row = rows[row_index] if row_index < len(rows) and isinstance(rows[row_index], list) else []
+        return row[field_index] if field_index < len(row) else None
+    return None
 
 
 def build_car_wash_card(fields: dict[str, Any], record_id: str = "", accepted: bool = False) -> dict[str, Any]:

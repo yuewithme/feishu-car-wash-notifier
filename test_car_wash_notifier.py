@@ -381,6 +381,23 @@ class CarWashNotifierTests(unittest.TestCase):
 
         self.assertEqual(display, "X6S7715")
 
+    def test_linked_record_get_reads_tabular_shape(self):
+        result = SimpleNamespace(
+            returncode=0,
+            stdout='{"data":{"data":[["X6S7715"]],"fields":["车辆名称"],"record_id_list":["recvj0p6oofGEz"]}}',
+            stderr="",
+        )
+
+        with patch.object(car_wash_notifier.subprocess, "run", return_value=result):
+            display = car_wash_notifier.fetch_linked_record_display(
+                "tbl_vehicle",
+                "recvj0p6oofGEz",
+                "车辆名称",
+                "lark-cli",
+            )
+
+        self.assertEqual(display, "X6S7715")
+
     def test_record_get_parse_error_includes_raw_output(self):
         result = SimpleNamespace(returncode=0, stdout="", stderr="not-json")
 
