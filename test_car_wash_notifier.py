@@ -96,6 +96,12 @@ class CarWashNotifierTests(unittest.TestCase):
 
         self.assertEqual(car_wash_notifier.parse_sent_message_id(output), "om_123")
 
+    def test_sanitizes_idempotency_key_for_lark(self):
+        key = car_wash_notifier.build_idempotency_key("rec_1-private-ou_abc")
+
+        self.assertEqual(key, "car-wash-card-rec-1-private-ou-abc")
+        self.assertNotIn("_", key)
+
     def test_duplicate_field_error_is_treated_as_existing_field(self):
         stderr = 'validation_error Use a unique field name. Existing field: fldwoFyAra("任务状态"). Requested field name: "任务状态".'
 

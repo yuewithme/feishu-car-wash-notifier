@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import subprocess
 import sys
 import threading
@@ -1141,7 +1142,7 @@ def send_card(
     if not chat_id and not user_id:
         raise RuntimeError("No card target configured. Set target_chat_id, target_user_open_id, or pass --chat-id/--user-id.")
     target_args = ["--chat-id", chat_id] if chat_id else ["--user-id", user_id]
-    idempotency_key = f"car-wash-card-{record_id}" if record_id else f"car-wash-card-{datetime.now(TIMEZONE).timestamp()}"
+    idempotency_key = build_idempotency_key(record_id)
     result = subprocess.run(
         [
             lark_cli,
@@ -1175,6 +1176,12 @@ def send_card(
         cache_card(record_id, card)
     log_event("car_wash_card_sent", record_id=record_id, chat_id=chat_id, user_id=user_id, message_id=message_id)
     return message_id
+
+
+def build_idempotency_key(record_id: str = "") -> str:
+    raw_key = f"car-wash-card-{record_id}" if record_id else f"car-wash-card-{datetime.now(TIMEZONE).timestamp()}"
+    safe_key = re.sub(r"[^A-Za-z0-9-]+", "-", raw_key).strip("-")
+    return safe_key[:64] or "car-wash-card"
 
 
 def parse_sent_message_id(output: str) -> str:
