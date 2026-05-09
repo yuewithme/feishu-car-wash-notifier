@@ -598,7 +598,7 @@ def send_private_work_card_for_record(record_id: str, user_id: str, lark_cli: st
     message_id = send_card(
         card,
         lark_cli,
-        record_id=f"{record_id}-private-{user_id}",
+        record_id=private_card_idempotency_key(record_id),
         user_id=user_id,
     )
     if message_id:
@@ -665,7 +665,7 @@ def handle_card_action_event(
                     private_message_id = send_card(
                         private_card,
                         lark_cli,
-                        record_id=f"{action['record_id']}-private-{actor_open_id}",
+                        record_id=private_card_idempotency_key(action["record_id"]),
                         user_id=actor_open_id,
                     )
                     if private_message_id:
@@ -1182,7 +1182,11 @@ def send_card(
 def build_idempotency_key(record_id: str = "") -> str:
     raw_key = f"car-wash-card-{record_id}" if record_id else f"car-wash-card-{datetime.now(TIMEZONE).timestamp()}"
     safe_key = re.sub(r"[^A-Za-z0-9-]+", "-", raw_key).strip("-")
-    return safe_key[:64] or "car-wash-card"
+    return safe_key[:50] or "car-wash-card"
+
+
+def private_card_idempotency_key(record_id: str) -> str:
+    return f"{record_id}-private"
 
 
 def parse_sent_message_id(output: str) -> str:

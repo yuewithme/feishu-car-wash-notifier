@@ -102,6 +102,14 @@ class CarWashNotifierTests(unittest.TestCase):
         self.assertEqual(key, "car-wash-card-rec-1-private-ou-abc")
         self.assertNotIn("_", key)
 
+    def test_private_card_idempotency_key_excludes_user_id(self):
+        key = car_wash_notifier.build_idempotency_key(
+            car_wash_notifier.private_card_idempotency_key("rec27mC8vFuew2")
+        )
+
+        self.assertEqual(key, "car-wash-card-rec27mC8vFuew2-private")
+        self.assertLessEqual(len(key), 50)
+
     def test_duplicate_field_error_is_treated_as_existing_field(self):
         stderr = 'validation_error Use a unique field name. Existing field: fldwoFyAra("任务状态"). Requested field name: "任务状态".'
 
