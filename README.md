@@ -125,6 +125,12 @@ card.action.trigger,drive.file.bitable_record_changed_v1
 python car_wash_notifier.py --record-id rec_xxx
 ```
 
+手动补发某条记录的接单人私聊任务卡：
+
+```cmd
+python car_wash_notifier.py --send-private-card --record-id rec_xxx --user-id ou_xxx
+```
+
 手动轮询一次：
 
 ```cmd

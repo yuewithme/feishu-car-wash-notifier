@@ -83,6 +83,14 @@ class CarWashNotifierTests(unittest.TestCase):
         self.assertNotIn("value", actions[1])
         self.assertNotIn("接受任务", str(actions))
 
+    def test_private_work_card_upload_button_is_url_only(self):
+        card = car_wash_notifier.build_private_work_card(car_wash_notifier.sample_record()["fields"], "rec_1")
+
+        upload_button = card["elements"][1]["actions"][1]
+        self.assertEqual(upload_button["text"]["content"], "上传清洗照片")
+        self.assertIn("url", upload_button)
+        self.assertNotIn("value", upload_button)
+
     def test_parse_sent_message_id_from_cli_output(self):
         output = '{"data":{"message_id":"om_123"}}'
 

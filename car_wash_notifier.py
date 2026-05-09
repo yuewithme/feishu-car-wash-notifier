@@ -588,6 +588,24 @@ def process_record_payload(
     return card
 
 
+def send_private_work_card_for_record(record_id: str, user_id: str, lark_cli: str, dry_run: bool = False) -> dict[str, Any]:
+    fields = enrich_record_fields(fetch_record_fields(record_id, lark_cli), lark_cli)
+    card = build_private_work_card(fields, record_id)
+    if dry_run:
+        print(json.dumps({"target_user_id": user_id, "card": card}, ensure_ascii=False))
+        return card
+    message_id = send_card(
+        card,
+        lark_cli,
+        record_id=f"{record_id}-private-{user_id}",
+        user_id=user_id,
+    )
+    if message_id:
+        update_record(record_id, {field_mapping()["private_message_id"]: message_id}, lark_cli)
+    cache_card(f"{record_id}:private:{user_id}", card)
+    return card
+
+
 def handle_card_action_event(
     event: dict[str, Any],
     processed_action_ids: set[str],
@@ -1359,6 +1377,7 @@ def main() -> None:
     parser.add_argument("--inspect-base", action="store_true")
     parser.add_argument("--ensure-fields", action="store_true")
     parser.add_argument("--send-sample-card", action="store_true")
+    parser.add_argument("--send-private-card", action="store_true")
     parser.add_argument("--record-json", default="")
     parser.add_argument("--record-id", default="")
     parser.add_argument("--poll-once", action="store_true")
@@ -1379,6 +1398,11 @@ def main() -> None:
         return
     if args.send_sample_card:
         process_record_payload(sample_record(), args.lark_cli, args.chat_id, args.user_id, dry_run=args.dry_run)
+        return
+    if args.send_private_card:
+        if not args.record_id or not args.user_id:
+            raise RuntimeError("--send-private-card requires --record-id and --user-id")
+        send_private_work_card_for_record(args.record_id, args.user_id, args.lark_cli, dry_run=args.dry_run)
         return
     if args.record_id:
         process_record_payload(
