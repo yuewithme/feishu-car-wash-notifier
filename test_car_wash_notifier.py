@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 try:
     from feishu_car_wash_notifier import car_wash_notifier
@@ -244,6 +245,13 @@ class CarWashNotifierTests(unittest.TestCase):
             )
         )
         self.assertFalse(car_wash_notifier.should_notify_record({"车牌号": [{"id": "rec_vehicle"}]}))
+
+    def test_record_list_parse_error_includes_raw_output(self):
+        result = SimpleNamespace(returncode=0, stdout="", stderr="not-json")
+
+        with patch.object(car_wash_notifier.subprocess, "run", return_value=result):
+            with self.assertRaisesRegex(RuntimeError, "STDOUT"):
+                car_wash_notifier.list_records("lark-cli")
 
 
 if __name__ == "__main__":

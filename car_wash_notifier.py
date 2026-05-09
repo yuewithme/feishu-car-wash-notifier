@@ -481,8 +481,16 @@ def list_records(lark_cli: str) -> list[dict[str, Any]]:
         )
     try:
         payload = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Failed to parse record-list output: {exc}") from exc
+    except json.JSONDecodeError as stdout_exc:
+        try:
+            payload = json.loads(result.stderr)
+        except json.JSONDecodeError:
+            raise RuntimeError(
+                "Failed to parse record-list output\n"
+                f"STDOUT:\n{result.stdout}\n"
+                f"STDERR:\n{result.stderr}\n"
+                f"JSON error: {stdout_exc}"
+            ) from stdout_exc
     data = payload.get("data", {})
     fields = data.get("fields") or []
     rows = data.get("data") or []
