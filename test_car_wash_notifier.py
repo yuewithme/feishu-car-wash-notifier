@@ -79,17 +79,18 @@ class CarWashNotifierTests(unittest.TestCase):
 
         actions = card["elements"][1]["actions"]
         self.assertEqual(actions[0]["value"]["action"], "done")
-        self.assertEqual(len(actions), 1)
-        self.assertIn("上传清洗照片", card["elements"][0]["content"])
-        self.assertIn("record=rec_1", card["elements"][0]["content"])
+        self.assertEqual(actions[1]["text"]["content"], "上传清洗照片")
+        self.assertIn("record=rec_1", actions[1]["url"])
+        self.assertNotIn("value", actions[1])
         self.assertNotIn("接受任务", str(actions))
 
-    def test_private_work_card_has_no_url_button(self):
+    def test_private_work_card_upload_button_is_url_only(self):
         card = car_wash_notifier.build_private_work_card(car_wash_notifier.sample_record()["fields"], "rec_1")
 
-        actions = card["elements"][1]["actions"]
-        self.assertEqual(len(actions), 1)
-        self.assertNotIn("url", str(actions))
+        upload_button = card["elements"][1]["actions"][1]
+        self.assertEqual(upload_button["text"]["content"], "上传清洗照片")
+        self.assertIn("url", upload_button)
+        self.assertNotIn("value", upload_button)
 
     def test_parse_sent_message_id_from_cli_output(self):
         output = '{"data":{"message_id":"om_123"}}'
