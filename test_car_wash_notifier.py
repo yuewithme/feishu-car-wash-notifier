@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 try:
     from feishu_car_wash_notifier import car_wash_notifier
@@ -110,6 +111,43 @@ class CarWashNotifierTests(unittest.TestCase):
 
         self.assertEqual(key, "car-wash-card-rec27mC8vFuew2-private")
         self.assertLessEqual(len(key), 50)
+
+    def test_accept_updates_group_card_before_base_write_and_private_send(self):
+        calls = []
+        event = {
+            "header": {"event_type": "card.action.trigger"},
+            "event": {
+                "operator": {"open_id": "ou_cleaner"},
+                "action": {"value": {"action": "accept", "record_id": "rec_1"}},
+                "context": {"open_message_id": "om_1"},
+            },
+        }
+
+        def update_card_message(*_args):
+            calls.append("update_card")
+
+        def update_record(*_args):
+            calls.append("update_record")
+
+        def fetch_record_fields(*_args):
+            calls.append("fetch_record")
+            return car_wash_notifier.sample_record()["fields"]
+
+        def send_card(*_args, **_kwargs):
+            calls.append("send_private")
+            return "om_private"
+
+        with patch.object(car_wash_notifier, "load_cached_card", return_value=car_wash_notifier.build_car_wash_card(car_wash_notifier.sample_record()["fields"], "rec_1")), \
+            patch.object(car_wash_notifier, "update_card_message", side_effect=update_card_message), \
+            patch.object(car_wash_notifier, "update_record", side_effect=update_record), \
+            patch.object(car_wash_notifier, "fetch_record_fields", side_effect=fetch_record_fields), \
+            patch.object(car_wash_notifier, "send_card", side_effect=send_card), \
+            patch.object(car_wash_notifier, "cache_card"), \
+            patch.object(car_wash_notifier, "update_health"), \
+            patch.object(car_wash_notifier, "log_event"):
+            car_wash_notifier.handle_card_action_event(event, set(), "lark-cli")
+
+        self.assertEqual(calls[:4], ["update_card", "update_record", "fetch_record", "send_private"])
 
     def test_duplicate_field_error_is_treated_as_existing_field(self):
         stderr = 'validation_error Use a unique field name. Existing field: fldwoFyAra("任务状态"). Requested field name: "任务状态".'

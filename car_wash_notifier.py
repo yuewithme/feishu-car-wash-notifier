@@ -643,10 +643,9 @@ def handle_card_action_event(
         log_event("skip_done_without_photo", event_id=event_id, record_id=action["record_id"])
     elif action["record_id"] and update:
         try:
-            update_record(action["record_id"], update, lark_cli)
             message_id = find_message_id(event)
+            actor_open_id = find_actor_open_id(event) or ""
             if message_id and action["action"] == "accept":
-                actor_open_id = find_actor_open_id(event) or ""
                 card = load_cached_card(action["record_id"]) or find_card_payload(event)
                 if card:
                     updated_card = mark_group_card_accepted(card, actor_open_id)
@@ -659,6 +658,8 @@ def handle_card_action_event(
                     lark_cli,
                 )
                 cache_card(action["record_id"], updated_card)
+            update_record(action["record_id"], update, lark_cli)
+            if action["action"] == "accept":
                 if actor_open_id:
                     fields = enrich_record_fields(fetch_record_fields(action["record_id"], lark_cli), lark_cli)
                     private_card = build_private_work_card(fields, action["record_id"])
