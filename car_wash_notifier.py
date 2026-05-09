@@ -908,19 +908,20 @@ def build_car_wash_card(fields: dict[str, Any], record_id: str = "", accepted: b
 
 def build_private_work_card(fields: dict[str, Any], record_id: str = "") -> dict[str, Any]:
     card = build_car_wash_card(fields, record_id, accepted=False)
+    if record_id and isinstance(card.get("elements"), list) and card["elements"]:
+        first_element = card["elements"][0]
+        if isinstance(first_element, dict) and first_element.get("tag") == "markdown":
+            first_element["content"] = (
+                f"{first_element.get('content')}\n"
+                f"**上传清洗照片：** [打开记录上传]({build_base_record_url(record_id)})"
+            )
     card["elements"][1]["actions"] = [
         {
             "tag": "button",
             "text": {"tag": "plain_text", "content": "完成任务"},
             "type": "primary",
             "value": {"action": "done", "record_id": record_id},
-        },
-        {
-            "tag": "button",
-            "text": {"tag": "plain_text", "content": "上传清洗照片"},
-            "type": "default",
-            "url": build_base_record_url(record_id),
-        },
+        }
     ]
     return card
 
