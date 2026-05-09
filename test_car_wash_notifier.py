@@ -192,6 +192,29 @@ class CarWashNotifierTests(unittest.TestCase):
             {"action": "done", "record_id": "rec_1"},
         )
 
+    def test_parses_card_action_record_id_from_card_url(self):
+        event = {
+            "header": {"event_type": "card.action.trigger", "event_id": "evt_1"},
+            "event": {
+                "action": {"value": {"action": "done"}},
+                "context": {
+                    "card": {
+                        "elements": [
+                            {
+                                "tag": "button",
+                                "url": "https://atomdance.feishu.cn/base/app_xxx?table=tbl_xxx&record=rec27mDuSUwbVu",
+                            }
+                        ]
+                    }
+                },
+            },
+        }
+
+        self.assertEqual(
+            car_wash_notifier.parse_card_action(event),
+            {"action": "done", "record_id": "rec27mDuSUwbVu"},
+        )
+
     def test_builds_accept_update_from_click_user(self):
         event = {"event": {"operator": {"open_id": "ou_cleaner"}}}
         self.assertEqual(
@@ -282,6 +305,31 @@ class CarWashNotifierTests(unittest.TestCase):
         self.assertIn("--format", command)
         self.assertEqual(command[command.index("--format") + 1], "json")
 
+    def test_record_get_reads_data_fields_shape(self):
+        result = SimpleNamespace(
+            returncode=0,
+            stdout='{"data":{"fields":{"车牌号":"沪A12345","清洗需求":"小清洗"}}}',
+            stderr="",
+        )
+
+        with patch.object(car_wash_notifier.subprocess, "run", return_value=result):
+            fields = car_wash_notifier.fetch_record_fields("rec_1", "lark-cli")
+
+        self.assertEqual(fields["车牌号"], "沪A12345")
+        self.assertEqual(fields["清洗需求"], "小清洗")
+
+    def test_record_get_reads_raw_record_fields_shape(self):
+        result = SimpleNamespace(
+            returncode=0,
+            stdout='{"record":{},"raw":{"data":{"record":{"fields":{"车牌号":"沪A12345"}}}}}',
+            stderr="",
+        )
+
+        with patch.object(car_wash_notifier.subprocess, "run", return_value=result):
+            fields = car_wash_notifier.fetch_record_fields("rec_1", "lark-cli")
+
+        self.assertEqual(fields["车牌号"], "沪A12345")
+
     def test_linked_record_get_requests_json_format(self):
         result = SimpleNamespace(
             returncode=0,
@@ -296,6 +344,18 @@ class CarWashNotifierTests(unittest.TestCase):
         command = run.call_args.args[0]
         self.assertIn("--format", command)
         self.assertEqual(command[command.index("--format") + 1], "json")
+
+    def test_linked_record_get_reads_top_level_fields_shape(self):
+        result = SimpleNamespace(
+            returncode=0,
+            stdout='{"fields":{"车辆名称":"X6S7715"}}',
+            stderr="",
+        )
+
+        with patch.object(car_wash_notifier.subprocess, "run", return_value=result):
+            display = car_wash_notifier.fetch_linked_record_display("tbl_vehicle", "rec_vehicle", "车辆名称", "lark-cli")
+
+        self.assertEqual(display, "X6S7715")
 
     def test_record_get_parse_error_includes_raw_output(self):
         result = SimpleNamespace(returncode=0, stdout="", stderr="not-json")

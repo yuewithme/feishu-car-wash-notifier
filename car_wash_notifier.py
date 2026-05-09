@@ -721,10 +721,35 @@ def parse_card_action(event: dict[str, Any]) -> dict[str, str] | None:
     if not isinstance(value, dict):
         return None
     action = str(value.get("action") or "")
-    record_id = str(value.get("record_id") or "")
+    record_id = str(value.get("record_id") or find_record_id_from_event(event) or "")
     if not action:
         return None
     return {"action": action, "record_id": record_id}
+
+
+def find_record_id_from_event(event: dict[str, Any]) -> str | None:
+    direct = find_first_value(event, {"record_id", "recordId"})
+    if direct:
+        return direct
+    return find_record_id_in_strings(event)
+
+
+def find_record_id_in_strings(node: Any) -> str | None:
+    if isinstance(node, dict):
+        for value in node.values():
+            found = find_record_id_in_strings(value)
+            if found:
+                return found
+    elif isinstance(node, list):
+        for item in node:
+            found = find_record_id_in_strings(item)
+            if found:
+                return found
+    elif isinstance(node, str):
+        match = re.search(r"(?:[?&]|%3F|%26)record(?:=|%3D)(rec[A-Za-z0-9_]+)", node)
+        if match:
+            return match.group(1)
+    return None
 
 
 def build_action_update(
@@ -822,10 +847,61 @@ def fetch_record_fields(record_id: str, lark_cli: str) -> dict[str, Any]:
                 f"STDERR:\n{result.stderr}\n"
                 f"JSON error: {stdout_exc}"
             ) from stdout_exc
-    record = payload.get("data", {}).get("record") or payload.get("record") or {}
-    if isinstance(record, dict) and isinstance(record.get("fields"), dict):
-        return record["fields"]
-    return record if isinstance(record, dict) else {}
+    return extract_record_fields(payload)
+
+
+def extract_record_fields(payload: dict[str, Any]) -> dict[str, Any]:
+    candidates = [
+        payload.get("data", {}).get("record") if isinstance(payload.get("data"), dict) else None,
+        payload.get("record"),
+        payload.get("data") if isinstance(payload.get("data"), dict) else None,
+        payload.get("raw", {}).get("data", {}).get("record") if isinstance(payload.get("raw"), dict) else None,
+        payload.get("raw", {}).get("record") if isinstance(payload.get("raw"), dict) else None,
+    ]
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    if isinstance(data.get("raw"), dict):
+        candidates.extend(
+            [
+                data["raw"].get("data", {}).get("record") if isinstance(data["raw"].get("data"), dict) else None,
+                data["raw"].get("record"),
+            ]
+        )
+    candidates.append(payload)
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        fields = candidate.get("fields")
+        if isinstance(fields, dict):
+            return fields
+        if looks_like_fields(candidate):
+            return candidate
+    return {}
+
+
+def looks_like_fields(value: dict[str, Any]) -> bool:
+    metadata_keys = {
+        "record_id",
+        "recordId",
+        "_record_id",
+        "id",
+        "created_time",
+        "last_modified_time",
+        "fields",
+        "raw",
+        "record",
+        "data",
+        "ok",
+        "error",
+        "identity",
+        "_notice",
+    }
+    mapped_fields = set(field_mapping().values())
+    return any(
+        key in mapped_fields
+        or any("\u4e00" <= char <= "\u9fff" for char in key)
+        for key in value
+        if isinstance(key, str) and key not in metadata_keys
+    )
 
 
 def enrich_record_fields(fields: dict[str, Any], lark_cli: str) -> dict[str, Any]:
@@ -898,11 +974,7 @@ def fetch_linked_record_display(table_id: str, record_id: str, display_field: st
                 error=str(stdout_exc),
             )
             return ""
-    record = payload.get("data", {}).get("record") or payload.get("record") or {}
-    if not isinstance(record, dict):
-        return ""
-    fields = record.get("fields") if isinstance(record.get("fields"), dict) else record
-    return stringify_field(fields.get(display_field))
+    return stringify_field(extract_record_fields(payload).get(display_field))
 
 
 def build_car_wash_card(fields: dict[str, Any], record_id: str = "", accepted: bool = False) -> dict[str, Any]:
