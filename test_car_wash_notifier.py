@@ -267,6 +267,43 @@ class CarWashNotifierTests(unittest.TestCase):
         self.assertIn("--format", command)
         self.assertEqual(command[command.index("--format") + 1], "json")
 
+    def test_record_get_requests_json_format(self):
+        result = SimpleNamespace(
+            returncode=0,
+            stdout='{"data":{"record":{"fields":{"车牌号":"沪A12345"}}}}',
+            stderr="",
+        )
+
+        with patch.object(car_wash_notifier.subprocess, "run", return_value=result) as run:
+            fields = car_wash_notifier.fetch_record_fields("rec_1", "lark-cli")
+
+        self.assertEqual(fields["车牌号"], "沪A12345")
+        command = run.call_args.args[0]
+        self.assertIn("--format", command)
+        self.assertEqual(command[command.index("--format") + 1], "json")
+
+    def test_linked_record_get_requests_json_format(self):
+        result = SimpleNamespace(
+            returncode=0,
+            stdout='{"data":{"record":{"fields":{"车辆名称":"X6S7715"}}}}',
+            stderr="",
+        )
+
+        with patch.object(car_wash_notifier.subprocess, "run", return_value=result) as run:
+            display = car_wash_notifier.fetch_linked_record_display("tbl_vehicle", "rec_vehicle", "车辆名称", "lark-cli")
+
+        self.assertEqual(display, "X6S7715")
+        command = run.call_args.args[0]
+        self.assertIn("--format", command)
+        self.assertEqual(command[command.index("--format") + 1], "json")
+
+    def test_record_get_parse_error_includes_raw_output(self):
+        result = SimpleNamespace(returncode=0, stdout="", stderr="not-json")
+
+        with patch.object(car_wash_notifier.subprocess, "run", return_value=result):
+            with self.assertRaisesRegex(RuntimeError, "STDOUT"):
+                car_wash_notifier.fetch_record_fields("rec_1", "lark-cli")
+
 
 if __name__ == "__main__":
     unittest.main()

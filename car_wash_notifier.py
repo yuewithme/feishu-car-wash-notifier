@@ -793,6 +793,8 @@ def fetch_record_fields(record_id: str, lark_cli: str) -> dict[str, Any]:
             TABLE_ID,
             "--record-id",
             record_id,
+            "--format",
+            "json",
             "--as",
             "user",
         ],
@@ -810,8 +812,16 @@ def fetch_record_fields(record_id: str, lark_cli: str) -> dict[str, Any]:
         )
     try:
         payload = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Failed to parse record-get output: {exc}") from exc
+    except json.JSONDecodeError as stdout_exc:
+        try:
+            payload = json.loads(result.stderr)
+        except json.JSONDecodeError:
+            raise RuntimeError(
+                "Failed to parse record-get output\n"
+                f"STDOUT:\n{result.stdout}\n"
+                f"STDERR:\n{result.stderr}\n"
+                f"JSON error: {stdout_exc}"
+            ) from stdout_exc
     record = payload.get("data", {}).get("record") or payload.get("record") or {}
     if isinstance(record, dict) and isinstance(record.get("fields"), dict):
         return record["fields"]
@@ -859,6 +869,8 @@ def fetch_linked_record_display(table_id: str, record_id: str, display_field: st
             table_id,
             "--record-id",
             record_id,
+            "--format",
+            "json",
             "--as",
             "user",
         ],
@@ -873,12 +885,24 @@ def fetch_linked_record_display(table_id: str, record_id: str, display_field: st
         return ""
     try:
         payload = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return ""
+    except json.JSONDecodeError as stdout_exc:
+        try:
+            payload = json.loads(result.stderr)
+        except json.JSONDecodeError:
+            log_event(
+                "linked_record_parse_failed",
+                table_id=table_id,
+                record_id=record_id,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                error=str(stdout_exc),
+            )
+            return ""
     record = payload.get("data", {}).get("record") or payload.get("record") or {}
     if not isinstance(record, dict):
         return ""
-    return stringify_field(record.get(display_field))
+    fields = record.get("fields") if isinstance(record.get("fields"), dict) else record
+    return stringify_field(fields.get(display_field))
 
 
 def build_car_wash_card(fields: dict[str, Any], record_id: str = "", accepted: bool = False) -> dict[str, Any]:
