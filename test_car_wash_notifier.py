@@ -113,6 +113,12 @@ class CarWashNotifierTests(unittest.TestCase):
         self.assertEqual(key, "car-wash-card-rec27mC8vFuew2-private")
         self.assertLessEqual(len(key), 50)
 
+    def test_private_card_idempotency_key_can_be_unique(self):
+        with patch.object(car_wash_notifier.time, "time", return_value=1778317000.123):
+            key = car_wash_notifier.private_card_idempotency_key("rec27mC8vFuew2", unique=True)
+
+        self.assertEqual(key, "rec27mC8vFuew2-private-1778317000123")
+
     def test_accept_updates_group_card_before_base_write_and_private_send(self):
         calls = []
         event = {
@@ -329,6 +335,24 @@ class CarWashNotifierTests(unittest.TestCase):
             fields = car_wash_notifier.fetch_record_fields("rec_1", "lark-cli")
 
         self.assertEqual(fields["车牌号"], "沪A12345")
+
+    def test_record_get_falls_back_to_record_list_when_empty(self):
+        record_get_result = SimpleNamespace(returncode=0, stdout='{"ok":true,"data":{}}', stderr="")
+        record_list_result = SimpleNamespace(
+            returncode=0,
+            stdout='{"data":{"fields":["车牌号","清洗需求"],"data":[["沪A12345","小清洗"]],"record_id_list":["rec_1"]}}',
+            stderr="",
+        )
+
+        with patch.object(
+            car_wash_notifier.subprocess,
+            "run",
+            side_effect=[record_get_result, record_list_result],
+        ):
+            fields = car_wash_notifier.fetch_record_fields("rec_1", "lark-cli")
+
+        self.assertEqual(fields["车牌号"], "沪A12345")
+        self.assertEqual(fields["清洗需求"], "小清洗")
 
     def test_linked_record_get_requests_json_format(self):
         result = SimpleNamespace(

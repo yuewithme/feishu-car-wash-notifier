@@ -608,7 +608,7 @@ def send_private_work_card_for_record(record_id: str, user_id: str, lark_cli: st
     message_id = send_card(
         card,
         lark_cli,
-        record_id=private_card_idempotency_key(record_id),
+        record_id=private_card_idempotency_key(record_id, unique=True),
         user_id=user_id,
     )
     if message_id:
@@ -676,7 +676,7 @@ def handle_card_action_event(
                     private_message_id = send_card(
                         private_card,
                         lark_cli,
-                        record_id=private_card_idempotency_key(action["record_id"]),
+                        record_id=private_card_idempotency_key(action["record_id"], unique=True),
                         user_id=actor_open_id,
                     )
                     if private_message_id:
@@ -847,7 +847,14 @@ def fetch_record_fields(record_id: str, lark_cli: str) -> dict[str, Any]:
                 f"STDERR:\n{result.stderr}\n"
                 f"JSON error: {stdout_exc}"
             ) from stdout_exc
-    return extract_record_fields(payload)
+    fields = extract_record_fields(payload)
+    if fields:
+        return fields
+    fallback_fields = fetch_record_fields_from_record_list(record_id, lark_cli)
+    if fallback_fields:
+        log_event("record_get_fallback_to_record_list", record_id=record_id)
+        return fallback_fields
+    return {}
 
 
 def extract_record_fields(payload: dict[str, Any]) -> dict[str, Any]:
@@ -875,6 +882,68 @@ def extract_record_fields(payload: dict[str, Any]) -> dict[str, Any]:
             return fields
         if looks_like_fields(candidate):
             return candidate
+    return {}
+
+
+def fetch_record_fields_from_record_list(record_id: str, lark_cli: str) -> dict[str, Any]:
+    result = subprocess.run(
+        [
+            lark_cli,
+            "base",
+            "+record-list",
+            "--base-token",
+            BASE_TOKEN,
+            "--table-id",
+            TABLE_ID,
+            "--offset",
+            "0",
+            "--limit",
+            "200",
+            "--format",
+            "json",
+            "--as",
+            "user",
+        ],
+        text=True,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        log_event(
+            "record_list_fallback_failed",
+            record_id=record_id,
+            stdout=result.stdout,
+            stderr=result.stderr,
+        )
+        return {}
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as stdout_exc:
+        try:
+            payload = json.loads(result.stderr)
+        except json.JSONDecodeError:
+            log_event(
+                "record_list_fallback_parse_failed",
+                record_id=record_id,
+                stdout=result.stdout,
+                stderr=result.stderr,
+                error=str(stdout_exc),
+            )
+            return {}
+    data = payload.get("data", {})
+    fields = data.get("fields") or []
+    rows = data.get("data") or []
+    record_ids = data.get("record_id_list") or []
+    for index, current_record_id in enumerate(record_ids):
+        if str(current_record_id) != record_id:
+            continue
+        values = rows[index] if index < len(rows) and isinstance(rows[index], list) else []
+        return {
+            str(field): values[field_index] if field_index < len(values) else None
+            for field_index, field in enumerate(fields)
+        }
     return {}
 
 
@@ -1291,8 +1360,9 @@ def build_idempotency_key(record_id: str = "") -> str:
     return safe_key[:50] or "car-wash-card"
 
 
-def private_card_idempotency_key(record_id: str) -> str:
-    return f"{record_id}-private"
+def private_card_idempotency_key(record_id: str, unique: bool = False) -> str:
+    suffix = f"-{int(time.time() * 1000)}" if unique else ""
+    return f"{record_id}-private{suffix}"
 
 
 def parse_sent_message_id(output: str) -> str:
