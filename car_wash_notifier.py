@@ -464,6 +464,8 @@ def list_records(lark_cli: str) -> list[dict[str, Any]]:
             "0",
             "--limit",
             "200",
+            "--format",
+            "json",
             "--as",
             "user",
         ],

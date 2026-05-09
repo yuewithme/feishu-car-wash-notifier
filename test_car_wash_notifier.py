@@ -253,6 +253,20 @@ class CarWashNotifierTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "STDOUT"):
                 car_wash_notifier.list_records("lark-cli")
 
+    def test_record_list_requests_json_format(self):
+        result = SimpleNamespace(
+            returncode=0,
+            stdout='{"data":{"fields":[],"data":[],"record_id_list":[]}}',
+            stderr="",
+        )
+
+        with patch.object(car_wash_notifier.subprocess, "run", return_value=result) as run:
+            car_wash_notifier.list_records("lark-cli")
+
+        command = run.call_args.args[0]
+        self.assertIn("--format", command)
+        self.assertEqual(command[command.index("--format") + 1], "json")
+
 
 if __name__ == "__main__":
     unittest.main()
