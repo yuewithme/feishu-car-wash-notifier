@@ -278,7 +278,12 @@ def list_field_names(lark_cli: str) -> list[str]:
     names: list[str] = []
     for field in fields:
         if isinstance(field, dict):
-            name = field.get("field_name") or field.get("name")
+            name = (
+                field.get("field_name")
+                or field.get("name")
+                or field.get("fieldName")
+                or field.get("field_alias")
+            )
             if name:
                 names.append(str(name))
         elif isinstance(field, str):
@@ -308,6 +313,9 @@ def create_field(field: dict[str, Any], lark_cli: str) -> None:
         check=False,
     )
     if result.returncode != 0:
+        if is_duplicate_field_error(result.stderr, str(field.get("name") or "")):
+            log_event("base_field_already_exists", field=field)
+            return
         raise RuntimeError(
             "Failed to create Base field\n"
             f"FIELD:\n{json.dumps(field, ensure_ascii=False)}\n"
@@ -315,6 +323,17 @@ def create_field(field: dict[str, Any], lark_cli: str) -> None:
             f"STDERR:\n{result.stderr}"
         )
     log_event("base_field_created", field=field)
+
+
+def is_duplicate_field_error(stderr: str, field_name: str) -> bool:
+    if not field_name:
+        return False
+    lowered = stderr.lower()
+    return (
+        "validation_error" in lowered
+        and "unique field name" in lowered
+        and field_name in stderr
+    )
 
 
 def run_listener(lark_cli: str, dry_run: bool = False) -> None:

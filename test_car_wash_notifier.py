@@ -83,6 +83,11 @@ class CarWashNotifierTests(unittest.TestCase):
 
         self.assertEqual(car_wash_notifier.parse_sent_message_id(output), "om_123")
 
+    def test_duplicate_field_error_is_treated_as_existing_field(self):
+        stderr = 'validation_error Use a unique field name. Existing field: fldwoFyAra("任务状态"). Requested field name: "任务状态".'
+
+        self.assertTrue(car_wash_notifier.is_duplicate_field_error(stderr, "任务状态"))
+
     def test_should_not_notify_record_with_group_message_id(self):
         self.assertFalse(
             car_wash_notifier.should_notify_record(
