@@ -901,7 +901,6 @@ def build_private_work_card(fields: dict[str, Any], record_id: str = "") -> dict
             "text": {"tag": "plain_text", "content": "上传清洗照片"},
             "type": "default",
             "url": build_base_record_url(record_id),
-            "value": {"action": "upload_photo", "record_id": record_id},
         },
     ]
     return card
@@ -943,7 +942,6 @@ def build_card_actions(record_id: str, accepted: bool = False) -> list[dict[str,
                 "text": {"tag": "plain_text", "content": "上传清洗照片"},
                 "type": "default",
                 "url": build_base_record_url(record_id),
-                "value": {"action": "upload_photo", "record_id": record_id},
             }
         )
     return actions
@@ -964,7 +962,6 @@ def add_upload_button_to_card(card: dict[str, Any], record_id: str) -> dict[str,
                 "text": {"tag": "plain_text", "content": "上传清洗照片"},
                 "type": "default",
                 "url": build_base_record_url(record_id),
-                "value": {"action": "upload_photo", "record_id": record_id},
             }
         )
         element["actions"] = actions

@@ -30,6 +30,7 @@ class CarWashNotifierTests(unittest.TestCase):
         actions = card["elements"][1]["actions"]
         self.assertEqual(actions[2]["text"]["content"], "上传清洗照片")
         self.assertIn("record=sample_record_id", actions[2]["url"])
+        self.assertNotIn("value", actions[2])
 
     def test_adds_upload_button_to_existing_card_without_refetch(self):
         card = car_wash_notifier.build_car_wash_card(car_wash_notifier.sample_record()["fields"], "rec_1")
@@ -38,7 +39,9 @@ class CarWashNotifierTests(unittest.TestCase):
         updated = car_wash_notifier.add_upload_button_to_card_event(event, "rec_1")
 
         actions = updated["elements"][1]["actions"]
-        self.assertEqual(actions[2]["value"]["action"], "upload_photo")
+        self.assertEqual(actions[2]["text"]["content"], "上传清洗照片")
+        self.assertIn("record=rec_1", actions[2]["url"])
+        self.assertNotIn("value", actions[2])
 
     def test_adds_upload_button_to_cached_card_without_losing_fields(self):
         card = car_wash_notifier.build_car_wash_card(car_wash_notifier.sample_record()["fields"], "rec_1")
@@ -49,7 +52,8 @@ class CarWashNotifierTests(unittest.TestCase):
         self.assertIn("沪A12345", content)
         self.assertIn("内外清洗", content)
         self.assertIn("2026-05-08 16:30:00", content)
-        self.assertEqual(updated["elements"][1]["actions"][2]["value"]["action"], "upload_photo")
+        self.assertIn("record=rec_1", updated["elements"][1]["actions"][2]["url"])
+        self.assertNotIn("value", updated["elements"][1]["actions"][2])
 
     def test_marks_done_button_cleaned_and_disabled(self):
         card = car_wash_notifier.build_car_wash_card(car_wash_notifier.sample_record()["fields"], "rec_1")
@@ -75,7 +79,8 @@ class CarWashNotifierTests(unittest.TestCase):
 
         actions = card["elements"][1]["actions"]
         self.assertEqual(actions[0]["value"]["action"], "done")
-        self.assertEqual(actions[1]["value"]["action"], "upload_photo")
+        self.assertIn("record=rec_1", actions[1]["url"])
+        self.assertNotIn("value", actions[1])
         self.assertNotIn("接受任务", str(actions))
 
     def test_parse_sent_message_id_from_cli_output(self):
